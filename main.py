@@ -2,7 +2,6 @@ import socket
 import json
 import time
 import threading
-import os
 from datetime import datetime, timedelta
 
 # Constants
@@ -31,7 +30,6 @@ class ServiceAnnouncer:
             self.socket.sendto(message.encode(), (BROADCAST_IP, BROADCAST_PORT))
             time.sleep(8)
 
-
 class PeerDiscovery(threading.Thread):
     def __init__(self):
         super().__init__()
@@ -44,13 +42,11 @@ class PeerDiscovery(threading.Thread):
             message, addr = self.socket.recvfrom(1024)
             data = json.loads(message.decode())
             self.peers[addr[0]] = {'username': data['username'], 'last_seen': get_timestamp()}
-            print(f"{data['username']} is online")
-
-
 
 class ChatInitiator:
     def __init__(self, peer_discovery):
         self.peer_discovery = peer_discovery
+        self.running = True
 
     def view_users(self):
         current_time = datetime.now()
@@ -60,48 +56,58 @@ class ChatInitiator:
                 status = "(Online)" if (current_time - last_seen).seconds <= ACTIVE_THRESHOLD else "(Away)"
                 print(f"{info['username']} {status}")
 
-    def initiate_chat(self, username, message, secure=False):
+    def initiate_chat(self, username):
         for ip, info in self.peer_discovery.peers.items():
             if info['username'] == username:
-                self.send_message(ip, message, secure)
+                threading.Thread(target=self.handle_chat, args=(ip,)).start()
                 break
+        else:
+            print("User not found or not available.")
 
-    def send_message(self, ip, message, secure):
+    def handle_chat(self, ip):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((ip, CHAT_PORT))
-            if secure:
-                # Secure chat implementation (simplified)
-                message = json.dumps({"encrypted message": message})  # Encrypt here
-            else:
-                message = json.dumps({"unencrypted message": message})
-            s.sendall(message.encode())
-            log_entry = f"{get_timestamp()} SENT to {ip}: {message}"
-            save_log(log_entry)
-
+            try:
+                s.connect((ip, CHAT_PORT))
+                while self.running:
+                    message = input("You: ")
+                    if message.lower() == "exit":
+                        self.running = False
+                        break
+                    message = json.dumps({"encrypted message": message})  # Encrypt here
+                    s.sendall(message.encode())
+                    log_entry = f"{get_timestamp()} SENT to {ip}: {message}"
+                    save_log(log_entry)
+            except ConnectionRefusedError:
+                print("Failed to connect to the user.")
 
 class ChatResponder(threading.Thread):
     def __init__(self):
         super().__init__()
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind(("", CHAT_PORT))
         self.socket.listen(1)
 
     def run(self):
+        print("Chat responder started and listening for incoming connections...")
         while True:
             conn, addr = self.socket.accept()
-            with conn:
-                message = json.loads(conn.recv(1024).decode())
-                if 'key' in message:
-                    # Handle key exchange here
-                    pass
-                elif 'encrypted message' in message:
-                    # Decrypt message here
-                    content = message['encrypted message']
-                else:
-                    content = message['unencrypted message']
-                print(f"Message from {addr}: {content}")
-                log_entry = f"{get_timestamp()} RECEIVED from {addr}: {content}"
-                save_log(log_entry)
+            threading.Thread(target=self.handle_client, args=(conn, addr)).start()
+
+    def handle_client(self, conn, addr):
+        with conn:
+            try:
+                while True:
+                    message = json.loads(conn.recv(1024).decode())
+                    if 'encrypted message' in message:
+                        content = message['encrypted message']  # Decrypt here
+                    else:
+                        content = message['unencrypted message']
+                    print(f"\nMessage from {addr}: {content}")
+                    log_entry = f"{get_timestamp()} RECEIVED from {addr}: {content}"
+                    save_log(log_entry)
+            except json.JSONDecodeError:
+                print("Connection closed by client.")
 
 def main():
     username = input("Enter your username: ")
@@ -110,12 +116,16 @@ def main():
     responder = ChatResponder()
     initiator = ChatInitiator(discovery)
 
-    # Start background processes
-    threading.Thread(target=announcer.announce_presence).start()
-    discovery.run()
-    responder.run()
+    announcer_thread = threading.Thread(target=announcer.announce_presence)
+    announcer_thread.daemon = True
+    announcer_thread.start()
 
-    # User interaction loop
+    discovery.daemon = True
+    discovery.start()
+
+    responder.daemon = True
+    responder.start()
+
     while True:
         print("\nMenu:")
         print("1 - View Online Users")
@@ -128,12 +138,13 @@ def main():
             initiator.view_users()
         elif choice == '2':
             username = input("Enter the username to chat with: ")
-            message = input("Enter your message: ")
-            secure = input("Secure chat? (yes/no): ").lower() == 'yes'
-            initiator.initiate_chat(username, message, secure)
+            initiator.initiate_chat(username)
         elif choice == '3':
-            with open('chat_history.log', 'r') as file:
-                print(file.read())
+            try:
+                with open('chat_history.log', 'r') as file:
+                    print(file.read())
+            except FileNotFoundError:
+                print("Chat history is currently empty.")
         elif choice == '4':
             print("Exiting chat application.")
             break
@@ -142,5 +153,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
