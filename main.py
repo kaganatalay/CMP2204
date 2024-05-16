@@ -1,120 +1,187 @@
 import socket
 import threading
 import json
-import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+import os
+from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-# Constants
-BROADCAST_IP = '192.168.169.255'
+
+BROADCAST_IP = '192.168.1.255'
 BROADCAST_PORT = 6000
 TCP_PORT = 6001
-DISCOVERY_INTERVAL = 8
-USER_TIMEOUT = 900
-ONLINE_TIMEOUT = 10
-LOG_FILENAME = 'chat_history.log'
+USERNAME = None
+PEER_DICT = {}
+PEER_TIMEOUT = 900
+AWAY_TIMEOUT = 10
+LOCK = threading.Lock()
 
-# Global dictionary to store peer information
-peers = {}
+# Service Announcer
+def service_announcer():
+    global USERNAME
+    USERNAME = input("Enter your username: ")
+    msg = json.dumps({"username": USERNAME}).encode('utf-8')
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        while True:
+            s.sendto(msg, (BROADCAST_IP, BROADCAST_PORT))
+            time.sleep(8)
 
-# Lock for thread-safe operations on peers dictionary
-lock = threading.Lock()
+# Peer Discovery
+def peer_discovery():
+    global PEER_DICT
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(('', BROADCAST_PORT))
+        while True:
+            data, addr = s.recvfrom(1024)
+            msg = json.loads(data.decode('utf-8'))
+            with LOCK:
+                if addr[0] in PEER_DICT:
+                    PEER_DICT[addr[0]]['last_seen'] = datetime.now()
+                else:
+                    PEER_DICT[addr[0]] = {'username': msg['username'], 'last_seen': datetime.now()}
+                    print(f"{msg['username']} is online")
 
-# Function to broadcast presence
-def broadcast_presence(username):
-    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+# Chat Initiator
+def chat_initiator():
+    global PEER_DICT
     while True:
-        message = json.dumps({'username': username})
-        udp_socket.sendto(message.encode(), (BROADCAST_IP, BROADCAST_PORT))
-        time.sleep(DISCOVERY_INTERVAL)
+        action = input("Enter action (Users/Chat/History): ").strip().lower()
+        if action == 'users':
+            with LOCK:
+                now = datetime.now()
+                for ip, info in PEER_DICT.items():
+                    status = "Online" if (now - info['last_seen']).seconds <= AWAY_TIMEOUT else "Away"
+                    print(f"{info['username']} ({status})")
+        elif action == 'chat':
+            peer_username = input("Enter username to chat with: ").strip()
+            secure_chat = input("Secure chat? (yes/no): ").strip().lower() == 'yes'
+            with LOCK:
+                peer_ip = None
+                for ip, info in PEER_DICT.items():
+                    if info['username'] == peer_username:
+                        peer_ip = ip
+                        break
+                if peer_ip:
+                    initiate_chat(peer_ip, secure_chat)
+                else:
+                    print("User not found")
+        elif action == 'history':
+            view_chat_history()
 
-# Function to listen for broadcasts
-def listen_for_broadcasts():
-    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_socket.bind(('', BROADCAST_PORT))
-    while True:
-        message, addr = udp_socket.recvfrom(1024)
-        ip = addr[0]
-        data = json.loads(message.decode())
-        username = data['username']
-        with lock:
-            peers[ip] = {'username': username, 'timestamp': time.time()}
-            # print(f"{username} is online")
 
-# Function to display peers
-def display_peers():
-    current_time = time.time()
-    with lock:
-        for ip, info in peers.items():
-            if current_time - info['timestamp'] <= USER_TIMEOUT:
-                status = "(Online)" if current_time - info['timestamp'] <= ONLINE_TIMEOUT else "(Away)"
-                print(f"{info['username']} {status}")
+def initiate_chat(peer_ip, secure_chat):
+    global USERNAME
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.connect((peer_ip, TCP_PORT))
+            if secure_chat:
+                key = dh_key_exchange(s)
+            else:
+                key = None
+            while True:
+                message = input("Enter message: ")
+                if key:
+                    encrypted_message = encrypt_message(key, message)
+                    s.sendall(json.dumps({"encrypted message": encrypted_message}).encode('utf-8'))
+                else:
+                    s.sendall(json.dumps({"unencrypted message": message}).encode('utf-8'))
+                log_message(peer_ip, "SENT", message)
+        except Exception as e:
+            print(f"Error: {e}")
 
-# Function to initiate chat
-def initiate_chat():
-    peer_name = input("Enter the username to chat with: ")
-    with lock:
-        peer_ip = next((ip for ip, info in peers.items() if info['username'] == peer_name), None)
-    if peer_ip is None:
-        print("User not found.")
-        return
-    
-    tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    tcp_socket.connect((peer_ip, TCP_PORT))
-    
-    while True:
-        message = input("Enter your message (type 'exit' to end chat): ")
-        if message.lower() == 'exit':
-            break
-        tcp_socket.send(message.encode())
-        log_message(peer_name, message, 'SENT')
-    
-    tcp_socket.close()
+def dh_key_exchange(s):
+    parameters = dh.generate_parameters(generator=2, key_size=512)
+    private_key = parameters.generate_private_key()
+    public_key = private_key.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+    s.sendall(json.dumps({"key": public_key.decode('utf-8')}).encode('utf-8'))
+    response = json.loads(s.recv(1024).decode('utf-8'))
+    peer_public_key = response['key'].encode('utf-8')
+    shared_key = private_key.exchange(peer_public_key)
+    derived_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b'handshake data',
+    ).derive(shared_key)
+    return derived_key
 
-# Function to handle incoming TCP connections
-def handle_connection(conn, addr):
-    while True:
-        message = conn.recv(1024).decode()
-        if not message:
-            break
-        username = peers.get(addr[0], {}).get('username', 'Unknown')
-        print(f"Message from {username}: {message}")
-        log_message(username, message, 'RECEIVED')
-    conn.close()
+def encrypt_message(key, message):
+    # Implement encryption using the derived key
+    pass
 
-# Function to log messages
-def log_message(username, message, direction):
-    with open(LOG_FILENAME, 'a') as file:
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        file.write(f"{timestamp} | {username} | {direction} | {message}\n")
+def log_message(peer_ip, direction, message):
+    global USERNAME
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "username": USERNAME,
+        "peer_ip": peer_ip,
+        "direction": direction,
+        "message": message
+    }
+    with open("chat_log.txt", "a") as log_file:
+        log_file.write(json.dumps(log_entry) + "\n")
 
-# Function to start TCP server
-def start_tcp_server():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind(('', TCP_PORT))
-    server_socket.listen()
-    while True:
-        conn, addr = server_socket.accept()
-        threading.Thread(target=handle_connection, args=(conn, addr)).start()
+def view_chat_history():
+    if os.path.exists("chat_log.txt"):
+        with open("chat_log.txt", "r") as log_file:
+            for line in log_file:
+                entry = json.loads(line)
+                print(f"{entry['timestamp']} - {entry['username']} ({entry['direction']}): {entry['message']}")
+    else:
+        print("No chat history found")
 
-# Main function to run the application
-def main():
-    username = input("Enter your username: ")
-    threading.Thread(target=broadcast_presence, args=(username,)).start()
-    threading.Thread(target=listen_for_broadcasts).start()
-    threading.Thread(target=start_tcp_server).start()
-    while True:
-        print("\n1. View Online Users\n2. Initiate Chat\n3. Exit")
-        choice = input("Enter your choice: ")
-        if choice == '1':
-            display_peers()
-        elif choice == '2':
-            initiate_chat()
-        elif choice == '3':
-            break
-        else:
-            print("Invalid choice. Please try again.")
+# Chat Responder
+def chat_responder():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', TCP_PORT))
+        s.listen()
+        while True:
+            conn, addr = s.accept()
+            threading.Thread(target=handle_chat, args=(conn, addr)).start()
 
-if __name__ == '__main__':
-    main()
+def handle_chat(conn, addr):
+    with conn:
+        while True:
+            data = conn.recv(1024)
+            if not data:
+                break
+            msg = json.loads(data.decode('utf-8'))
+            if "key" in msg:
+                key_exchange_response(conn, msg["key"])
+            elif "encrypted message" in msg:
+                message = decrypt_message(msg["encrypted message"])
+                print(f"Encrypted message from {addr[0]}: {message}")
+                log_message(addr[0], "RECEIVED", message)
+            elif "unencrypted message" in msg:
+                message = msg["unencrypted message"]
+                print(f"Message from {addr[0]}: {message}")
+                log_message(addr[0], "RECEIVED", message)
+
+def key_exchange_response(conn, peer_public_key):
+    parameters = dh.generate_parameters(generator=2, key_size=512)
+    private_key = parameters.generate_private_key()
+    public_key = private_key.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+    conn.sendall(json.dumps({"key": public_key.decode('utf-8')}).encode('utf-8'))
+    shared_key = private_key.exchange(peer_public_key.encode('utf-8'))
+    derived_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b'handshake data',
+    ).derive(shared_key)
+    return derived_key
+
+def decrypt_message(encrypted_message):
+    # Implement decryption using the derived key
+    pass
+
+if __name__ == "__main__":
+    threading.Thread(target=service_announcer).start()
+    threading.Thread(target=peer_discovery).start()
+    threading.Thread(target=chat_initiator).start()
+    threading.Thread(target=chat_responder).start()
