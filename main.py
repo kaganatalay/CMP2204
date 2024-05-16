@@ -1,155 +1,112 @@
 import socket
+import threading
 import json
 import time
-import threading
-from datetime import datetime, timedelta
 
-# Constants
-BROADCAST_IP = '192.168.169.255'  # Replace with your broadcast IP
+BROADCAST_INTERVAL = 8  # seconds
 BROADCAST_PORT = 6000
 CHAT_PORT = 6001
-DISCOVERY_TIMEOUT = 900  # 15 minutes in seconds
-ACTIVE_THRESHOLD = 10  # 10 seconds to be considered online
+discovered_peers = {}
+log_file = "chat_log.txt"
 
-def get_timestamp():
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+USERNAME = input("Enter your username: ")
 
-def save_log(entry):
-    with open('chat_history.log', 'a') as file:
-        file.write(f"{entry}\n")
-
-class ServiceAnnouncer:
-    def __init__(self, username):
-        self.username = username
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-
-    def announce_presence(self):
-        message = json.dumps({"username": self.username})
-        while True:
-            self.socket.sendto(message.encode(), (BROADCAST_IP, BROADCAST_PORT))
-            time.sleep(8)
-
-class PeerDiscovery(threading.Thread):
-    def __init__(self):
-        super().__init__()
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.socket.bind(("", BROADCAST_PORT))
-        self.peers = {}
-
-    def run(self):
-        while True:
-            message, addr = self.socket.recvfrom(1024)
-            data = json.loads(message.decode())
-            self.peers[addr[0]] = {'username': data['username'], 'last_seen': get_timestamp()}
-
-class ChatInitiator:
-    def __init__(self, peer_discovery):
-        self.peer_discovery = peer_discovery
-        self.running = True
-
-    def view_users(self):
-        current_time = datetime.now()
-        for ip, info in self.peer_discovery.peers.items():
-            last_seen = datetime.strptime(info['last_seen'], '%Y-%m-%d %H:%M:%S')
-            if (current_time - last_seen) <= timedelta(seconds=DISCOVERY_TIMEOUT):
-                status = "(Online)" if (current_time - last_seen).seconds <= ACTIVE_THRESHOLD else "(Away)"
-                print(f"{info['username']} {status}")
-
-    def initiate_chat(self, username):
-        for ip, info in self.peer_discovery.peers.items():
-            if info['username'] == username:
-                threading.Thread(target=self.handle_chat, args=(ip,)).start()
-                break
-        else:
-            print("User not found or not available.")
-
-    def handle_chat(self, ip):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.connect((ip, CHAT_PORT))
-                while self.running:
-                    message = input("You: ")
-                    if message.lower() == "exit":
-                        self.running = False
-                        break
-                    message = json.dumps({"encrypted message": message})  # Encrypt here
-                    s.sendall(message.encode())
-                    log_entry = f"{get_timestamp()} SENT to {ip}: {message}"
-                    save_log(log_entry)
-            except ConnectionRefusedError:
-                print("Failed to connect to the user.")
-
-class ChatResponder(threading.Thread):
-    def __init__(self):
-        super().__init__()
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.socket.bind(("", CHAT_PORT))
-        self.socket.listen(1)
-
-    def run(self):
-        print("Chat responder started and listening for incoming connections...")
-        while True:
-            conn, addr = self.socket.accept()
-            threading.Thread(target=self.handle_client, args=(conn, addr)).start()
-
-    def handle_client(self, conn, addr):
-        with conn:
-            try:
-                while True:
-                    message = json.loads(conn.recv(1024).decode())
-                    if 'encrypted message' in message:
-                        content = message['encrypted message']  # Decrypt here
-                    else:
-                        content = message['unencrypted message']
-                    print(f"\nMessage from {addr}: {content}")
-                    log_entry = f"{get_timestamp()} RECEIVED from {addr}: {content}"
-                    save_log(log_entry)
-            except json.JSONDecodeError:
-                print("Connection closed by client.")
-
-def main():
-    username = input("Enter your username: ")
-    announcer = ServiceAnnouncer(username)
-    discovery = PeerDiscovery()
-    responder = ChatResponder()
-    initiator = ChatInitiator(discovery)
-
-    announcer_thread = threading.Thread(target=announcer.announce_presence)
-    announcer_thread.daemon = True
-    announcer_thread.start()
-
-    discovery.daemon = True
-    discovery.start()
-
-    responder.daemon = True
-    responder.start()
+# Service Announcement
+def broadcast_presence():
+    broadcast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    broadcast_message = json.dumps({"username": USERNAME}).encode('utf-8')
 
     while True:
-        print("\nMenu:")
-        print("1 - View Online Users")
-        print("2 - Start a Chat")
-        print("3 - View Chat History")
-        print("4 - Exit")
-        choice = input("Enter your choice: ")
+        broadcast_socket.sendto(broadcast_message, ('<broadcast>', BROADCAST_PORT))
+        time.sleep(BROADCAST_INTERVAL)
 
-        if choice == '1':
-            initiator.view_users()
-        elif choice == '2':
-            username = input("Enter the username to chat with: ")
-            initiator.initiate_chat(username)
-        elif choice == '3':
-            try:
-                with open('chat_history.log', 'r') as file:
-                    print(file.read())
-            except FileNotFoundError:
-                print("Chat history is currently empty.")
-        elif choice == '4':
-            print("Exiting chat application.")
+# Peer Discovery
+def listen_for_peers():
+    discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    discovery_socket.bind(('', BROADCAST_PORT))
+
+    while True:
+        message, addr = discovery_socket.recvfrom(1024)
+        peer_info = json.loads(message.decode('utf-8'))
+        peer_ip = addr[0]
+        peer_info['timestamp'] = time.time()
+        discovered_peers[peer_ip] = peer_info
+        print(f"{peer_info['username']} is online")
+
+# Chat Initiation
+def view_users():
+    current_time = time.time()
+    print("Available users:")
+    for peer_ip, peer_info in discovered_peers.items():
+        if current_time - peer_info['timestamp'] <= 900:
+            status = "Online" if current_time - peer_info['timestamp'] <= 10 else "Away"
+            print(f"{peer_info['username']} ({status})")
+
+def initiate_chat(username):
+    peer_ip = None
+    for ip, info in discovered_peers.items():
+        if info['username'] == username:
+            peer_ip = ip
             break
-        else:
-            print("Invalid choice. Please try again.")
+    if peer_ip:
+        chat_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            chat_socket.connect((peer_ip, CHAT_PORT))
+            message = input("Enter your message: ")
+            chat_message = json.dumps({"unencryptedmessage": message}).encode('utf-8')
+            chat_socket.sendall(chat_message)
+            chat_socket.close()
+            log_message("SENT", username, peer_ip, message)
+        except:
+            print("Connection could not be established.")
+    else:
+        print("User not found.")
 
+def log_message(direction, username, ip, message):
+    with open(log_file, 'a') as f:
+        f.write(f"{time.ctime()} - {direction} - {username} ({ip}): {message}\n")
+
+def view_chat_history():
+    try:
+        with open(log_file, 'r') as f:
+            history = f.read()
+            print("Chat History:")
+            print(history)
+    except FileNotFoundError:
+        print("No chat history found.")
+
+# Chat Responder
+def handle_client(client_socket):
+    message = client_socket.recv(1024)
+    message_data = json.loads(message.decode('utf-8'))
+    if 'unencryptedmessage' in message_data:
+        print(f"Received message: {message_data['unencryptedmessage']}")
+        log_message("RECEIVED", client_socket.getpeername()[0], message_data['unencryptedmessage'])
+    client_socket.close()
+
+def start_chat_responder():
+    chat_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    chat_socket.bind(('', CHAT_PORT))
+    chat_socket.listen(5)
+    print("Chat responder listening on port 6001...")
+
+    while True:
+        client_socket, addr = chat_socket.accept()
+        threading.Thread(target=handle_client, args=(client_socket,)).start()
+
+# Main function
 if __name__ == "__main__":
-    main()
+    threading.Thread(target=broadcast_presence).start()
+    threading.Thread(target=listen_for_peers).start()
+    threading.Thread(target=start_chat_responder).start()
+
+    while True:
+        action = input("Enter 'Users' to view online users, 'Chat' to initiate a chat, or 'History' to view chat history: ")
+        if action.lower() == "users":
+            view_users()
+        elif action.lower() == "chat":
+            username = input("Enter the username to chat with: ")
+            initiate_chat(username)
+        elif action.lower() == "history":
+            view_chat_history()
