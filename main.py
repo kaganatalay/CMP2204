@@ -3,6 +3,13 @@ import threading
 import time
 import json
 from datetime import datetime, timedelta
+from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.hazmat.primitives.serialization import PublicFormat, Encoding
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
 
 # Configuration
 BROADCAST_IP = '192.168.1.255'  # Or your actual broadcast IP
@@ -14,6 +21,40 @@ USERNAME = input("Enter your username: ")
 peers = {}
 state_lock = threading.Lock()
 chat_history = []
+
+# Generate Diffie-Hellman parameters
+parameters = dh.generate_parameters(generator=2, key_size=2048, backend=default_backend())
+
+def generate_dh_key():
+    private_key = parameters.generate_private_key()
+    public_key = private_key.public_key()
+    return private_key, public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+
+def generate_shared_secret(private_key, peer_public_key):
+    peer_public_key = serialization.load_pem_public_key(peer_public_key, backend=default_backend())
+    shared_secret = private_key.exchange(peer_public_key)
+    derived_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b'handshake data',
+        backend=default_backend()
+    ).derive(shared_secret)
+    return derived_key
+
+def encrypt_message(key, message):
+    cipher = Cipher(algorithms.AES(key), modes.GCM(get_random_bytes(16)), backend=default_backend())
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(message.encode()) + encryptor.finalize()
+    return base64.b64encode(encryptor.tag + ciphertext).decode()
+
+def decrypt_message(key, encrypted_message):
+    decoded_message = base64.b64decode(encrypted_message)
+    tag, ciphertext = decoded_message[:16], decoded_message[16:]
+    cipher = Cipher(algorithms.AES(key), modes.GCM(get_random_bytes(16), tag), backend=default_backend())
+    decryptor = cipher.decryptor()
+    plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+    return plaintext.decode()
 
 def broadcast_presence():
     while True:
@@ -54,16 +95,22 @@ def handle_client_connection(client_socket, address):
     ip = address[0]
     username = peers[ip]['username']
 
+    # Receive public key from client
+    peer_public_key = client_socket.recv(2048).decode()
+    private_key, public_key = generate_dh_key()
+    client_socket.send(public_key.encode())
+    shared_secret = generate_shared_secret(private_key, peer_public_key)
+
     while True:
         data = client_socket.recv(1024)
         if not data:
             break
 
-        message = json.loads(data.decode())
+        encrypted_message = json.loads(data.decode())['unencrypted_message']
+        message = decrypt_message(shared_secret, encrypted_message)
 
-        if "unencrypted_message" in message:
-            print(f"\n- {username}: {message['unencrypted_message']}\n")
-            chat_history.append((datetime.now(), username, ip, 'RECEIVED', message['unencrypted_message']))
+        print(f"\n- {username}: {message}\n")
+        chat_history.append((datetime.now(), username, ip, 'RECEIVED', message))
 
     client_socket.close()  # Close the connection after handling the message
 
@@ -108,11 +155,19 @@ def initiate_chat():
         is_secure = input("Chat securely? (yes/no): ").lower() == "yes"
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((recipient_ip, TCP_PORT))
-
+        
+        if is_secure:
+            private_key, public_key = generate_dh_key()
+            client_socket.send(public_key.encode())
+            peer_public_key = client_socket.recv(2048).decode()
+            shared_secret = generate_shared_secret(private_key, peer_public_key)
+        
         while True:
             message = input(f"\nEnter your message for {chat_username}: ")
             if not message:
                 break
+            if is_secure:
+                message = encrypt_message(shared_secret, message)
             client_socket.send(json.dumps({"username": USERNAME, "unencrypted_message": message}).encode())
             chat_history.append((datetime.now(), chat_username, recipient_ip, 'SENT', message))
             client_socket.close()  # Close immediately after sending
@@ -136,7 +191,6 @@ def menu():
             view_chat_history()
         else:
             print("\nInvalid choice. Please try again.\n")
-
 
 if __name__ == "__main__":
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
