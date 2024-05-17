@@ -3,13 +3,6 @@ import threading
 import time
 import json
 from datetime import datetime, timedelta
-from cryptography.hazmat.primitives.asymmetric import dh
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.backends import default_backend
-from cryptography.fernet import Fernet
-import base64
 
 # Configuration
 BROADCAST_IP = '192.168.1.255'  # Or your actual broadcast IP
@@ -21,34 +14,6 @@ USERNAME = input("Enter your username: ")
 peers = {}
 state_lock = threading.Lock()
 chat_history = []
-
-# Parameters for Diffie-Hellman key exchange
-parameters = dh.generate_parameters(generator=2, key_size=2048, backend=default_backend())
-private_keys = {}  # Store private keys per peer
-public_keys = {}   # Store public keys per peer
-shared_secrets = {}  # Store shared secrets per peer
-
-def serialize_key(key):
-    return key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode('utf-8')
-
-def deserialize_key(key_bytes):
-    return serialization.load_pem_public_key(
-        key_bytes.encode('utf-8'),
-        backend=default_backend()
-    )
-
-def derive_key(shared_secret):
-    hkdf = HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=None,
-        info=b'handshake data',
-        backend=default_backend()
-    )
-    return hkdf.derive(shared_secret)
 
 def broadcast_presence():
     while True:
@@ -88,7 +53,6 @@ def display_user_state():
 def handle_client_connection(client_socket, address):
     ip = address[0]
     username = peers[ip]['username']
-    private_key = private_keys.get(username)
 
     while True:
         data = client_socket.recv(1024)
@@ -97,27 +61,7 @@ def handle_client_connection(client_socket, address):
 
         message = json.loads(data.decode())
 
-        if "public_key" in message:
-            peer_public_key = deserialize_key(message["public_key"])
-            if not private_key:
-                private_key = parameters.generate_private_key()
-                private_keys[username] = private_key
-            shared_secret = private_key.exchange(peer_public_key)
-            encryption_key = derive_key(shared_secret)
-            shared_secrets[username] = encryption_key
-            print(f"Received public key from {username} and derived shared secret")
-
-        elif "encrypted_message" in message:
-            encryption_key = shared_secrets.get(username)
-            if encryption_key:
-                f = Fernet(base64.urlsafe_b64encode(encryption_key))
-                decrypted_message = f.decrypt(message["encrypted_message"].encode()).decode()
-                print(f"\n- {username}: {decrypted_message}\n")
-                chat_history.append((datetime.now(), username, ip, 'RECEIVED', decrypted_message))
-            else:
-                print(f"Error: No encryption key found for {username}")
-
-        elif "unencrypted_message" in message:
+        if "unencrypted_message" in message:
             print(f"\n- {username}: {message['unencrypted_message']}\n")
             chat_history.append((datetime.now(), username, ip, 'RECEIVED', message['unencrypted_message']))
 
@@ -165,37 +109,11 @@ def initiate_chat():
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((recipient_ip, TCP_PORT))
 
-        if is_secure:
-            private_key = parameters.generate_private_key()
-            public_key = private_key.public_key()
-            private_keys[chat_username] = private_key
-            public_keys[chat_username] = public_key
-            client_socket.send(json.dumps({"public_key": serialize_key(public_key)}).encode())
-            print(f"Sent public key to {chat_username}: {serialize_key(public_key)}")
-            data = client_socket.recv(1024)
-            if data:
-                message = json.loads(data.decode())
-                if "public_key" in message:
-                    peer_public_key = deserialize_key(message["public_key"])
-                    shared_secret = private_key.exchange(peer_public_key)
-                    encryption_key = derive_key(shared_secret)
-                    shared_secrets[chat_username] = encryption_key
-                    print(f"Received public key from {chat_username} and derived shared secret")
-
         while True:
             message = input(f"\nEnter your message for {chat_username}: ")
             if not message:
                 break
-            if is_secure:
-                encryption_key = shared_secrets.get(chat_username)
-                if encryption_key:
-                    f = Fernet(base64.urlsafe_b64encode(encryption_key))
-                    encrypted_message = f.encrypt(message.encode()).decode()
-                    client_socket.send(json.dumps({"encrypted_message": encrypted_message}).encode())
-                else:
-                    print(f"Error: No encryption key found for {chat_username}")
-            else:
-                client_socket.send(json.dumps({"username": USERNAME, "unencrypted_message": message}).encode())
+            client_socket.send(json.dumps({"username": USERNAME, "unencrypted_message": message}).encode())
             chat_history.append((datetime.now(), chat_username, recipient_ip, 'SENT', message))
             client_socket.close()  # Close immediately after sending
             break  # Exit the loop after sending one message
