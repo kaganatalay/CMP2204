@@ -66,7 +66,7 @@ def handle_client_connection(client_socket, address):
 
     # Diffie-Hellman Key Exchange
     peer_public_key_bytes = client_socket.recv(1024)
-    peer_public_key = dh.DHPublicKey.from_encoded_point(parameters, peer_public_key_bytes)
+    peer_public_key = serialization.load_pem_public_key(peer_public_key_bytes) 
     shared_key = private_key.exchange(peer_public_key)
     shared_keys[ip] = shared_key
 
@@ -146,9 +146,9 @@ def initiate_chat():
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         ))
         peer_public_key_bytes = client_socket.recv(1024)
-        peer_public_key = dh.DHPublicKey.from_encoded_point(parameters, peer_public_key_bytes)
+        peer_public_key = serialization.load_pem_public_key(peer_public_key_bytes)
         shared_key = private_key.exchange(peer_public_key)
-        shared_keys[recipient_ip] = shared_key
+        shared_keys[recipient_ip] = shared_key  
 
         # Key Derivation Function (KDF) to get a usable key for Fernet
         derived_key = HKDF(
