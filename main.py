@@ -158,8 +158,8 @@ def initiate_chat():
         
         if is_secure:
             private_key, public_key = generate_dh_key()
-            client_socket.send(public_key.encode())
-            peer_public_key = client_socket.recv(2048).decode()
+            client_socket.send(public_key)  # Send public key directly without encoding
+            peer_public_key = client_socket.recv(2048)  # Assume peer sends public key in correct format
             shared_secret = generate_shared_secret(private_key, peer_public_key)
         
         while True:
@@ -174,6 +174,7 @@ def initiate_chat():
             break  # Exit the loop after sending one message
     else:
         print("\nUser not found or offline\n")
+
 
 def menu():
     while True:
