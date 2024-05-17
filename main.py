@@ -72,7 +72,7 @@ def handle_client_connection(client_socket, address):
             if not dh:
                 dh = DiffieHellman()
                 dh_objects[username] = dh
-                public_key = dh.gen_public_key()
+                public_key = dh.generate_public_key()
                 client_socket.send(json.dumps({"key": public_key}).encode())
             shared_key = dh.gen_shared_key(message['key'])
             encryption_key = PBKDF2HMAC(
@@ -137,7 +137,7 @@ def initiate_chat():
         if is_secure:
             dh = DiffieHellman()
             dh_objects[chat_username] = dh
-            public_key = dh.gen_public_key()
+            public_key = dh.generate_public_key()
             client_socket.send(json.dumps({"key": public_key}).encode())
             data = client_socket.recv(1024)
             if data:
