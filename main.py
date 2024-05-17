@@ -14,16 +14,23 @@ USERNAME = input("Enter your username: ")
 peers = {}
 state_lock = threading.Lock()
 chat_history = []
+terminate = False
 
 def broadcast_presence():
-    while True:
+    global terminate
+    while not terminate:
         message = json.dumps({"username": USERNAME})
         sock.sendto(message.encode(), (BROADCAST_IP, BROADCAST_PORT))
         time.sleep(8)
+    sock.close()
 
 def listen_for_peers():
-    while True:
-        data, addr = sock.recvfrom(1024)
+    global terminate
+    while not terminate:
+        try:
+            data, addr = sock.recvfrom(1024)
+        except socket.error:
+            break
         message = json.loads(data.decode())
         username = message["username"]
         ip = addr[0]
@@ -32,12 +39,14 @@ def listen_for_peers():
             current_time = datetime.now()
             if ip not in peers:
                 peers[ip] = {'username': username, 'timestamp': current_time, 'state': 'online'}
-                print(f"{username} is online")
+                print(f"\n{username} is online\n")
             else:
                 peers[ip]['timestamp'] = current_time
+    sock.close()
 
 def display_user_state():
-    while True:
+    global terminate
+    while not terminate:
         time.sleep(1)
         with state_lock:
             current_time = datetime.now()
@@ -45,10 +54,10 @@ def display_user_state():
                 last_seen = current_time - info['timestamp']
                 if last_seen > timedelta(seconds=10) and info['state'] != 'away':
                     info['state'] = 'away'
-                    print(f"{info['username']} is away")
+                    print(f"\n{info['username']} is away\n")
                 elif last_seen <= timedelta(seconds=10) and info['state'] != 'online':
                     info['state'] = 'online'
-                    print(f"{info['username']} is online")
+                    print(f"\n{info['username']} is online\n")
 
 def handle_client_connection(client_socket, address):
     while True:
@@ -57,38 +66,46 @@ def handle_client_connection(client_socket, address):
             break
         message = json.loads(data.decode())
         if "unencrypted message" in message:
-            print(f"{message['username']}: {message['unencrypted message']}")
+            print(f"\n{message['username']}: {message['unencrypted message']}\n")
             chat_history.append((datetime.now(), message['username'], address[0], 'RECEIVED', message['unencrypted message']))
         elif "encrypted message" in message:
             # Handle encrypted message if needed
             pass
-
     client_socket.close()
 
 def start_tcp_server():
+    global terminate
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind(('', TCP_PORT))
     server_socket.listen(5)
     
-    while True:
-        client_socket, address = server_socket.accept()
-        threading.Thread(target=handle_client_connection, args=(client_socket, address)).start()
+    while not terminate:
+        try:
+            client_socket, address = server_socket.accept()
+            threading.Thread(target=handle_client_connection, args=(client_socket, address)).start()
+        except socket.error:
+            break
+    server_socket.close()
 
 def view_online_users():
     with state_lock:
         current_time = datetime.now()
+        print("\nOnline Users:\n")
         for ip, info in peers.items():
             last_seen = current_time - info['timestamp']
             state = "Online" if last_seen <= timedelta(seconds=10) else "Away"
             print(f"{info['username']} ({state})")
+        print()
 
 def view_chat_history():
+    print("\nChat History:\n")
     for entry in chat_history:
         timestamp, username, ip, direction, message = entry
         print(f"[{timestamp}] {username} ({ip}) {direction}: {message}")
+    print()
 
 def initiate_chat():
-    chat_username = input("Enter the username to chat with: ")
+    chat_username = input("\nEnter the username to chat with: ")
     recipient_ip = None
     
     with state_lock:
@@ -98,23 +115,24 @@ def initiate_chat():
                 break
     
     if recipient_ip:
-        message = input("Enter your message: ")
+        message = input(f"\nEnter your message for {chat_username}: ")
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((recipient_ip, TCP_PORT))
         client_socket.send(json.dumps({"username": USERNAME, "unencrypted message": message}).encode())
         chat_history.append((datetime.now(), chat_username, recipient_ip, 'SENT', message))
         client_socket.close()
     else:
-        print("User not found or offline")
+        print("\nUser not found or offline\n")
 
 def menu():
+    global terminate
     while True:
         print("\nMenu:")
         print("1. View online users")
         print("2. Initiate chat")
         print("3. View chat history")
         print("4. Exit")
-        choice = input("Enter your choice: ")
+        choice = input("\nEnter your choice: ")
 
         if choice == '1':
             view_online_users()
@@ -123,9 +141,10 @@ def menu():
         elif choice == '3':
             view_chat_history()
         elif choice == '4':
+            terminate = True
             break
         else:
-            print("Invalid choice. Please try again.")
+            print("\nInvalid choice. Please try again.\n")
 
 if __name__ == "__main__":
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -138,3 +157,5 @@ if __name__ == "__main__":
     threading.Thread(target=start_tcp_server).start()
     
     menu()
+    print("\nExiting... Please wait for background threads to finish.\n")
+    time.sleep(2)  # Give threads time to clean up
