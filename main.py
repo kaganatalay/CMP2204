@@ -7,6 +7,7 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from diffiehellman.diffiehellman import DiffieHellman
+import base64
 
 # Configuration
 BROADCAST_IP = '192.168.1.255'  # Or your actual broadcast IP
@@ -74,7 +75,9 @@ def handle_client_connection(client_socket, address):
                 dh_objects[username] = dh
                 public_key = dh.generate_public_key()
                 client_socket.send(json.dumps({"key": public_key}).encode())
+                print(f"Sent public key to {username}: {public_key}")
             shared_key = dh.generate_shared_secret(message['key'])
+            print(f"Received public key from {username}: {message['key']}, generated shared key: {shared_key}")
             encryption_key = PBKDF2HMAC(
                 algorithm=hashes.SHA256(),
                 length=32,
@@ -139,11 +142,13 @@ def initiate_chat():
             dh_objects[chat_username] = dh
             public_key = dh.generate_public_key()
             client_socket.send(json.dumps({"key": public_key}).encode())
+            print(f"Sent public key to {chat_username}: {public_key}")
             data = client_socket.recv(1024)
             if data:
                 message = json.loads(data.decode())
                 if "key" in message:
                     shared_key = dh.generate_shared_secret(message['key'])
+                    print(f"Received public key from {chat_username}: {message['key']}, generated shared key: {shared_key}")
                     encryption_key = PBKDF2HMAC(
                         algorithm=hashes.SHA256(),
                         length=32,
