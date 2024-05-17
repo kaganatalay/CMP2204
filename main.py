@@ -3,7 +3,7 @@ import threading
 import time
 import json
 from datetime import datetime, timedelta
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.fernet import Fernet
@@ -81,7 +81,10 @@ def handle_client_connection(client_socket, address):
     f = Fernet(derived_key)
 
     # Send your public key
-    client_socket.sendall(public_key.public_bytes())
+    client_socket.sendall(public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )) 
 
     while True:
         data = client_socket.recv(1024)
@@ -138,7 +141,10 @@ def initiate_chat():
         # Diffie-Hellman key exchange (client-side)
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((recipient_ip, TCP_PORT))
-        client_socket.sendall(public_key.public_bytes())
+        client_socket.sendall(public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ))
         peer_public_key_bytes = client_socket.recv(1024)
         peer_public_key = dh.DHPublicKey.from_encoded_point(parameters, peer_public_key_bytes)
         shared_key = private_key.exchange(peer_public_key)
