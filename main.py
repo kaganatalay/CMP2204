@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timedelta
 
 # Configuration
-BROADCAST_IP = '255.255.255.255'
+BROADCAST_IP = '192.168.1.255'
 BROADCAST_PORT = 6000
 TCP_PORT = 6001
 USERNAME = input("Enter your username: ")
@@ -29,8 +29,8 @@ def listen_for_peers():
         
         with state_lock:
             current_time = datetime.now()
-            if ip not in peers or (ip in peers and peers[ip]['timestamp'] < current_time - timedelta(seconds=10)):
-                peers[ip] = {'username': username, 'timestamp': current_time}
+            if ip not in peers:
+                peers[ip] = {'username': username, 'timestamp': current_time, 'state': 'online'}
                 print(f"{username} is online")
             else:
                 peers[ip]['timestamp'] = current_time
@@ -41,10 +41,12 @@ def display_user_state():
         with state_lock:
             current_time = datetime.now()
             for ip, info in list(peers.items()):
-                if current_time - info['timestamp'] > timedelta(seconds=10):
+                last_seen = current_time - info['timestamp']
+                if last_seen > timedelta(seconds=10) and info['state'] != 'away':
+                    info['state'] = 'away'
                     print(f"{info['username']} is away")
-                    del peers[ip]
-                elif current_time - info['timestamp'] <= timedelta(seconds=10):
+                elif last_seen <= timedelta(seconds=10) and info['state'] != 'online':
+                    info['state'] = 'online'
                     print(f"{info['username']} is online")
 
 def handle_client_connection(client_socket, address):
