@@ -1,112 +1,100 @@
 import socket
 import threading
-import json
 import time
+import json
+from datetime import datetime, timedelta
 
-BROADCAST_INTERVAL = 8  # seconds
+# Configuration
+BROADCAST_IP = '255.255.255.255'
 BROADCAST_PORT = 6000
-CHAT_PORT = 6001
-discovered_peers = {}
-log_file = "chat_log.txt"
-
+TCP_PORT = 6001
 USERNAME = input("Enter your username: ")
 
-# Service Announcement
+# Global state
+peers = {}
+state_lock = threading.Lock()
+
 def broadcast_presence():
-    broadcast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    broadcast_message = json.dumps({"username": USERNAME}).encode('utf-8')
-
     while True:
-        broadcast_socket.sendto(broadcast_message, ('<broadcast>', BROADCAST_PORT))
-        time.sleep(BROADCAST_INTERVAL)
+        message = json.dumps({"username": USERNAME})
+        sock.sendto(message.encode(), (BROADCAST_IP, BROADCAST_PORT))
+        time.sleep(8)
 
-# Peer Discovery
 def listen_for_peers():
-    discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    discovery_socket.bind(('', BROADCAST_PORT))
-
     while True:
-        message, addr = discovery_socket.recvfrom(1024)
-        peer_info = json.loads(message.decode('utf-8'))
-        peer_ip = addr[0]
-        peer_info['timestamp'] = time.time()
-        discovered_peers[peer_ip] = peer_info
-        print(f"{peer_info['username']} is online")
+        data, addr = sock.recvfrom(1024)
+        message = json.loads(data.decode())
+        username = message["username"]
+        ip = addr[0]
+        
+        with state_lock:
+            current_time = datetime.now()
+            if ip not in peers or (ip in peers and peers[ip]['timestamp'] < current_time - timedelta(seconds=10)):
+                peers[ip] = {'username': username, 'timestamp': current_time}
+                print(f"{username} is online")
+            else:
+                peers[ip]['timestamp'] = current_time
 
-# Chat Initiation
-def view_users():
-    current_time = time.time()
-    print("Available users:")
-    for peer_ip, peer_info in discovered_peers.items():
-        if current_time - peer_info['timestamp'] <= 900:
-            status = "Online" if current_time - peer_info['timestamp'] <= 10 else "Away"
-            print(f"{peer_info['username']} ({status})")
+def display_user_state():
+    while True:
+        time.sleep(1)
+        with state_lock:
+            current_time = datetime.now()
+            for ip, info in list(peers.items()):
+                if current_time - info['timestamp'] > timedelta(seconds=10):
+                    print(f"{info['username']} is away")
+                    del peers[ip]
+                elif current_time - info['timestamp'] <= timedelta(seconds=10):
+                    print(f"{info['username']} is online")
 
-def initiate_chat(username):
-    peer_ip = None
-    for ip, info in discovered_peers.items():
-        if info['username'] == username:
-            peer_ip = ip
+def handle_client_connection(client_socket, address):
+    while True:
+        data = client_socket.recv(1024)
+        if not data:
             break
-    if peer_ip:
-        chat_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            chat_socket.connect((peer_ip, CHAT_PORT))
-            message = input("Enter your message: ")
-            chat_message = json.dumps({"unencryptedmessage": message}).encode('utf-8')
-            chat_socket.sendall(chat_message)
-            chat_socket.close()
-            log_message("SENT", username, peer_ip, message)
-        except:
-            print("Connection could not be established.")
-    else:
-        print("User not found.")
+        message = json.loads(data.decode())
+        if "unencrypted message" in message:
+            print(f"{message['username']}: {message['unencrypted message']}")
 
-def log_message(direction, username, ip, message):
-    with open(log_file, 'a') as f:
-        f.write(f"{time.ctime()} - {direction} - {username} ({ip}): {message}\n")
-
-def view_chat_history():
-    try:
-        with open(log_file, 'r') as f:
-            history = f.read()
-            print("Chat History:")
-            print(history)
-    except FileNotFoundError:
-        print("No chat history found.")
-
-# Chat Responder
-def handle_client(client_socket):
-    message = client_socket.recv(1024)
-    message_data = json.loads(message.decode('utf-8'))
-    if 'unencryptedmessage' in message_data:
-        print(f"Received message: {message_data['unencryptedmessage']}")
-        log_message("RECEIVED", client_socket.getpeername()[0], message_data['unencryptedmessage'])
     client_socket.close()
 
-def start_chat_responder():
-    chat_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    chat_socket.bind(('', CHAT_PORT))
-    chat_socket.listen(5)
-    print("Chat responder listening on port 6001...")
-
+def start_tcp_server():
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(('', TCP_PORT))
+    server_socket.listen(5)
+    
     while True:
-        client_socket, addr = chat_socket.accept()
-        threading.Thread(target=handle_client, args=(client_socket,)).start()
+        client_socket, address = server_socket.accept()
+        threading.Thread(target=handle_client_connection, args=(client_socket, address)).start()
 
-# Main function
+def initiate_chat():
+    while True:
+        chat_username = input("Enter the username to chat with: ")
+        recipient_ip = None
+        
+        with state_lock:
+            for ip, info in peers.items():
+                if info['username'] == chat_username:
+                    recipient_ip = ip
+                    break
+        
+        if recipient_ip:
+            message = input("Enter your message: ")
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client_socket.connect((recipient_ip, TCP_PORT))
+            client_socket.send(json.dumps({"username": USERNAME, "unencrypted message": message}).encode())
+            client_socket.close()
+        else:
+            print("User not found or offline")
+
 if __name__ == "__main__":
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.bind(('', BROADCAST_PORT))
+    
     threading.Thread(target=broadcast_presence).start()
     threading.Thread(target=listen_for_peers).start()
-    threading.Thread(target=start_chat_responder).start()
-
-    while True:
-        action = input("Enter 'Users' to view online users, 'Chat' to initiate a chat, or 'History' to view chat history: ")
-        if action.lower() == "users":
-            view_users()
-        elif action.lower() == "chat":
-            username = input("Enter the username to chat with: ")
-            initiate_chat(username)
-        elif action.lower() == "history":
-            view_chat_history()
+    threading.Thread(target=display_user_state).start()
+    threading.Thread(target=start_tcp_server).start()
+    
+    initiate_chat()
