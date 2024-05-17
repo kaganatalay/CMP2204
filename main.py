@@ -3,9 +3,13 @@ import threading
 import time
 import json
 from datetime import datetime, timedelta
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from diffiehellman.diffiehellman import DiffieHellman
 
 # Configuration
-BROADCAST_IP = '192.168.1.255'
+BROADCAST_IP = '192.168.1.255'  # Or your actual broadcast IP
 BROADCAST_PORT = 6000
 TCP_PORT = 6001
 USERNAME = input("Enter your username: ")
@@ -14,6 +18,9 @@ USERNAME = input("Enter your username: ")
 peers = {}
 state_lock = threading.Lock()
 chat_history = []
+
+# Diffie-Hellman for secure chat
+dh_objects = {}  # Store Diffie-Hellman objects per peer
 
 def broadcast_presence():
     while True:
@@ -27,7 +34,7 @@ def listen_for_peers():
         message = json.loads(data.decode())
         username = message["username"]
         ip = addr[0]
-        
+
         with state_lock:
             current_time = datetime.now()
             if ip not in peers:
@@ -51,17 +58,38 @@ def display_user_state():
                     print(f"\n{info['username']} is online\n")
 
 def handle_client_connection(client_socket, address):
+    username = peers[address[0]]['username']
+    dh = dh_objects.get(username)  # Get existing DH object or create a new one
+
     while True:
         data = client_socket.recv(1024)
         if not data:
             break
+
         message = json.loads(data.decode())
-        if "unencrypted message" in message:
-            print(f"\n- {message['username']}: {message['unencrypted message']}\n")
-            chat_history.append((datetime.now(), message['username'], address[0], 'RECEIVED', message['unencrypted message']))
-        elif "encrypted message" in message:
-            # Handle encrypted message if needed
-            pass
+
+        if "key" in message:
+            if not dh:
+                dh = DiffieHellman()
+                dh_objects[username] = dh
+                public_key = dh.gen_public_key()
+                client_socket.send(json.dumps({"key": public_key}).encode())
+            shared_key = dh.gen_shared_key(message['key'])
+            encryption_key = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=b'salt_',
+                iterations=390000,
+            ).derive(str(shared_key).encode())
+        elif "encrypted_message" in message:
+            f = Fernet(base64.urlsafe_b64encode(encryption_key))
+            decrypted_message = f.decrypt(message["encrypted_message"].encode()).decode()
+            print(f"\n- {username}: {decrypted_message}\n")
+            chat_history.append((datetime.now(), username, address[0], 'RECEIVED', decrypted_message))
+        elif "unencrypted_message" in message:
+            print(f"\n- {username}: {message['unencrypted_message']}\n")
+            chat_history.append((datetime.now(), username, address[0], 'RECEIVED', message['unencrypted_message']))
+
     client_socket.close()
 
 def start_tcp_server():
@@ -102,11 +130,38 @@ def initiate_chat():
                 break
     
     if recipient_ip:
-        message = input(f"\nEnter your message for {chat_username}: ")
+        is_secure = input("Chat securely? (yes/no): ").lower() == "yes"
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((recipient_ip, TCP_PORT))
-        client_socket.send(json.dumps({"username": USERNAME, "unencrypted message": message}).encode())
-        chat_history.append((datetime.now(), chat_username, recipient_ip, 'SENT', message))
+
+        if is_secure:
+            dh = DiffieHellman()
+            dh_objects[chat_username] = dh
+            public_key = dh.gen_public_key()
+            client_socket.send(json.dumps({"key": public_key}).encode())
+            data = client_socket.recv(1024)
+            if data:
+                message = json.loads(data.decode())
+                if "key" in message:
+                    shared_key = dh.gen_shared_key(message['key'])
+                    encryption_key = PBKDF2HMAC(
+                        algorithm=hashes.SHA256(),
+                        length=32,
+                        salt=b'salt_',
+                        iterations=390000,
+                    ).derive(str(shared_key).encode())
+
+        while True:
+            message = input(f"\nEnter your message for {chat_username}: ")
+            if not message:
+                break
+            if is_secure:
+                f = Fernet(base64.urlsafe_b64encode(encryption_key))
+                encrypted_message = f.encrypt(message.encode()).decode()
+                client_socket.send(json.dumps({"encrypted_message": encrypted_message}).encode())
+            else:
+                client_socket.send(json.dumps({"username": USERNAME, "unencrypted_message": message}).encode())
+            chat_history.append((datetime.now(), chat_username, recipient_ip, 'SENT', message))
         client_socket.close()
     else:
         print("\nUser not found or offline\n")
