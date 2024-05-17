@@ -90,7 +90,7 @@ def handle_client_connection(client_socket, address):
             print(f"\n- {username}: {message['unencrypted_message']}\n")
             chat_history.append((datetime.now(), username, address[0], 'RECEIVED', message['unencrypted_message']))
 
-    client_socket.close()
+    client_socket.close()  # Close the connection after handling the message
 
 def start_tcp_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -162,7 +162,8 @@ def initiate_chat():
             else:
                 client_socket.send(json.dumps({"username": USERNAME, "unencrypted_message": message}).encode())
             chat_history.append((datetime.now(), chat_username, recipient_ip, 'SENT', message))
-        client_socket.close()
+            client_socket.close()  # Close immediately after sending
+            break  # Exit the loop after sending one message
     else:
         print("\nUser not found or offline\n")
 
@@ -182,6 +183,7 @@ def menu():
             view_chat_history()
         else:
             print("\nInvalid choice. Please try again.\n")
+
 
 if __name__ == "__main__":
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
