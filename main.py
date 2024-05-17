@@ -3,6 +3,10 @@ import threading
 import time
 import json
 from datetime import datetime, timedelta
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.fernet import Fernet
 
 # Configuration
 BROADCAST_IP = '192.168.1.255'  # Or your actual broadcast IP
@@ -14,6 +18,12 @@ USERNAME = input("Enter your username: ")
 peers = {}
 state_lock = threading.Lock()
 chat_history = []
+shared_keys = {}
+
+# Diffie-Hellman parameters
+parameters = dh.generate_parameters(generator=2, key_size=2048)
+private_key = parameters.generate_private_key()
+public_key = private_key.public_key()
 
 def broadcast_presence():
     while True:
@@ -54,28 +64,46 @@ def handle_client_connection(client_socket, address):
     ip = address[0]
     username = peers[ip]['username']
 
+    # Diffie-Hellman Key Exchange
+    peer_public_key_bytes = client_socket.recv(1024)
+    peer_public_key = dh.DHPublicKey.from_encoded_point(parameters, peer_public_key_bytes)
+    shared_key = private_key.exchange(peer_public_key)
+    shared_keys[ip] = shared_key
+
+    # Key Derivation Function (KDF) to get a usable key for Fernet
+    derived_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b'chat_encryption',
+    ).derive(shared_key)
+
+    f = Fernet(derived_key)
+
+    # Send your public key
+    client_socket.sendall(public_key.public_bytes())
+
     while True:
         data = client_socket.recv(1024)
         if not data:
             break
 
         message = json.loads(data.decode())
+        decrypted_message = f.decrypt(message['encrypted_message'].encode()).decode()
+        print(f"\n- {username}: {decrypted_message}\n")
+        chat_history.append((datetime.now(), username, ip, 'RECEIVED', decrypted_message))
 
-        if "unencrypted_message" in message:
-            print(f"\n- {username}: {message['unencrypted_message']}\n")
-            chat_history.append((datetime.now(), username, ip, 'RECEIVED', message['unencrypted_message']))
-
-    client_socket.close()  # Close the connection after handling the message
+    client_socket.close()
 
 def start_tcp_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind(('', TCP_PORT))
     server_socket.listen(5)
-    
+
     while True:
         client_socket, address = server_socket.accept()
         threading.Thread(target=handle_client_connection, args=(client_socket, address)).start()
-    server_socket.close()
+    server_socket.close()  # Add the server socket close after the loop
 
 def view_online_users():
     with state_lock:
@@ -97,26 +125,46 @@ def view_chat_history():
 def initiate_chat():
     chat_username = input("\nEnter the username to chat with: ")
     recipient_ip = None
-    
+
     with state_lock:
         for ip, info in peers.items():
             if info['username'] == chat_username:
                 recipient_ip = ip
                 break
-    
+
     if recipient_ip:
         is_secure = input("Chat securely? (yes/no): ").lower() == "yes"
+
+        # Diffie-Hellman key exchange (client-side)
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((recipient_ip, TCP_PORT))
+        client_socket.sendall(public_key.public_bytes())
+        peer_public_key_bytes = client_socket.recv(1024)
+        peer_public_key = dh.DHPublicKey.from_encoded_point(parameters, peer_public_key_bytes)
+        shared_key = private_key.exchange(peer_public_key)
+        shared_keys[recipient_ip] = shared_key
+
+        # Key Derivation Function (KDF) to get a usable key for Fernet
+        derived_key = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=None,
+            info=b'chat_encryption',
+        ).derive(shared_key)
+
+        f = Fernet(derived_key)
 
         while True:
             message = input(f"\nEnter your message for {chat_username}: ")
             if not message:
                 break
-            client_socket.send(json.dumps({"username": USERNAME, "unencrypted_message": message}).encode())
+
+            encrypted_message = f.encrypt(message.encode()).decode()
+            client_socket.send(json.dumps({"username": USERNAME, "encrypted_message": encrypted_message}).encode())
             chat_history.append((datetime.now(), chat_username, recipient_ip, 'SENT', message))
+
             client_socket.close()  # Close immediately after sending
-            break  # Exit the loop after sending one message
+            break 
     else:
         print("\nUser not found or offline\n")
 
@@ -142,10 +190,10 @@ if __name__ == "__main__":
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.bind(('', BROADCAST_PORT))
-    
+
     threading.Thread(target=broadcast_presence).start()
     threading.Thread(target=listen_for_peers).start()
     threading.Thread(target=display_user_state).start()
     threading.Thread(target=start_tcp_server).start()
-    
+
     menu()
