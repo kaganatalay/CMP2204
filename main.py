@@ -57,7 +57,7 @@ def handle_client_connection(client_socket, address):
             break
         message = json.loads(data.decode())
         if "unencrypted message" in message:
-            print(f"\n{message['username']}: {message['unencrypted message']}\n")
+            print(f"\n- {message['username']}: {message['unencrypted message']}\n")
             chat_history.append((datetime.now(), message['username'], address[0], 'RECEIVED', message['unencrypted message']))
         elif "encrypted message" in message:
             # Handle encrypted message if needed
@@ -117,7 +117,7 @@ def menu():
         print("1. View online users")
         print("2. Initiate chat")
         print("3. View chat history")
-        choice = input("\nEnter your choice: ")
+        choice = input("Enter your choice: ")
 
         if choice == '1':
             view_online_users()
