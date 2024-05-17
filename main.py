@@ -74,7 +74,7 @@ def handle_client_connection(client_socket, address):
                 dh_objects[username] = dh
                 public_key = dh.generate_public_key()
                 client_socket.send(json.dumps({"key": public_key}).encode())
-            shared_key = dh.generate_shared_key(message['key'])
+            shared_key = dh.generate_shared_secret(message['key'])
             encryption_key = PBKDF2HMAC(
                 algorithm=hashes.SHA256(),
                 length=32,
@@ -143,7 +143,7 @@ def initiate_chat():
             if data:
                 message = json.loads(data.decode())
                 if "key" in message:
-                    shared_key = dh.generate_shared_key(message['key'])
+                    shared_key = dh.generate_shared_secret(message['key'])
                     encryption_key = PBKDF2HMAC(
                         algorithm=hashes.SHA256(),
                         length=32,
