@@ -14,23 +14,16 @@ USERNAME = input("Enter your username: ")
 peers = {}
 state_lock = threading.Lock()
 chat_history = []
-terminate = False
 
 def broadcast_presence():
-    global terminate
-    while not terminate:
-        message = json.dumps({"username": USERNAME})
+    while True:
+        message = json.dumps({"username": USERNAME, "ip": socket.gethostbyname(socket.gethostname())})
         sock.sendto(message.encode(), (BROADCAST_IP, BROADCAST_PORT))
         time.sleep(8)
-    sock.close()
 
 def listen_for_peers():
-    global terminate
-    while not terminate:
-        try:
-            data, addr = sock.recvfrom(1024)
-        except socket.error:
-            break
+    while True:
+        data, addr = sock.recvfrom(1024)
         message = json.loads(data.decode())
         username = message["username"]
         ip = addr[0]
@@ -42,11 +35,9 @@ def listen_for_peers():
                 print(f"\n{username} is online\n")
             else:
                 peers[ip]['timestamp'] = current_time
-    sock.close()
 
 def display_user_state():
-    global terminate
-    while not terminate:
+    while True:
         time.sleep(1)
         with state_lock:
             current_time = datetime.now()
@@ -74,17 +65,13 @@ def handle_client_connection(client_socket, address):
     client_socket.close()
 
 def start_tcp_server():
-    global terminate
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind(('', TCP_PORT))
     server_socket.listen(5)
     
-    while not terminate:
-        try:
-            client_socket, address = server_socket.accept()
-            threading.Thread(target=handle_client_connection, args=(client_socket, address)).start()
-        except socket.error:
-            break
+    while True:
+        client_socket, address = server_socket.accept()
+        threading.Thread(target=handle_client_connection, args=(client_socket, address)).start()
     server_socket.close()
 
 def view_online_users():
@@ -125,13 +112,11 @@ def initiate_chat():
         print("\nUser not found or offline\n")
 
 def menu():
-    global terminate
     while True:
         print("\nMenu:")
         print("1. View online users")
         print("2. Initiate chat")
         print("3. View chat history")
-        print("4. Exit")
         choice = input("\nEnter your choice: ")
 
         if choice == '1':
@@ -140,9 +125,6 @@ def menu():
             initiate_chat()
         elif choice == '3':
             view_chat_history()
-        elif choice == '4':
-            terminate = True
-            break
         else:
             print("\nInvalid choice. Please try again.\n")
 
@@ -157,5 +139,3 @@ if __name__ == "__main__":
     threading.Thread(target=start_tcp_server).start()
     
     menu()
-    print("\nExiting... Please wait for background threads to finish.\n")
-    time.sleep(2)  # Give threads time to clean up
