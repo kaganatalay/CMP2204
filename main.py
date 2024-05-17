@@ -86,7 +86,9 @@ def display_user_state():
                     print(f"\n{info['username']} is online\n")
 
 def handle_client_connection(client_socket, address):
-    username = peers[address[0]]['username']
+    ip = address[0]
+    username = peers[ip]['username']
+    private_key = private_keys.get(username)
 
     while True:
         data = client_socket.recv(1024)
@@ -97,7 +99,9 @@ def handle_client_connection(client_socket, address):
 
         if "public_key" in message:
             peer_public_key = deserialize_key(message["public_key"])
-            private_key = private_keys[username]
+            if not private_key:
+                private_key = parameters.generate_private_key()
+                private_keys[username] = private_key
             shared_secret = private_key.exchange(peer_public_key)
             encryption_key = derive_key(shared_secret)
             shared_secrets[username] = encryption_key
@@ -109,13 +113,13 @@ def handle_client_connection(client_socket, address):
                 f = Fernet(base64.urlsafe_b64encode(encryption_key))
                 decrypted_message = f.decrypt(message["encrypted_message"].encode()).decode()
                 print(f"\n- {username}: {decrypted_message}\n")
-                chat_history.append((datetime.now(), username, address[0], 'RECEIVED', decrypted_message))
+                chat_history.append((datetime.now(), username, ip, 'RECEIVED', decrypted_message))
             else:
                 print(f"Error: No encryption key found for {username}")
 
         elif "unencrypted_message" in message:
             print(f"\n- {username}: {message['unencrypted_message']}\n")
-            chat_history.append((datetime.now(), username, address[0], 'RECEIVED', message['unencrypted_message']))
+            chat_history.append((datetime.now(), username, ip, 'RECEIVED', message['unencrypted_message']))
 
     client_socket.close()  # Close the connection after handling the message
 
