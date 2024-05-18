@@ -28,12 +28,7 @@ class ChatResponder:
             threading.Thread(target=self.handle_connection, args=(conn, addr)).start()
 
     def handle_connection(self, conn, addr):
-        print("connection handler")
-
         data = conn.recv(1024)
-
-        print(data)
-
         message = json.loads(data.decode())
 
         if "key" in message:
@@ -42,8 +37,7 @@ class ChatResponder:
             # Then receive the encrypted message
             d = conn.recv(1024)
             m = json.loads(d.decode())
-            print(m["encrypted_message"])
-            self.decrypt_message(m["encrypted_message"])
+            self.decrypt_message(addr, m["encrypted_message"])
         elif "unencrypted_message" in message:
             self.display_message(addr, message["unencrypted_message"])
 
@@ -58,9 +52,7 @@ class ChatResponder:
         self.shared_secret = key ** private_key % self.parameters[0]
         print(f"Shared secret key is: {self.shared_secret}")
         
-    def decrypt_message(self, encoded_message):
-        print(f"Decoding....")
-
+    def decrypt_message(self, addr, encoded_message):
         encrypted_message = base64.b64decode(encoded_message)
         iv = encrypted_message[:16]
         ct = encrypted_message[16:]
@@ -72,7 +64,7 @@ class ChatResponder:
         unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
         data = unpadder.update(padded_data) + unpadder.finalize()
 
-        print(f"Decoded: {data.decode()}")
+        self.display_message(addr, data)
     
     def generate_key_from_number(self, number):
         # Convert the number to a string and encode it to bytes
@@ -82,16 +74,6 @@ class ChatResponder:
         digest.update(number_str)   
         key = digest.finalize()
         return key
-
-    # def decrypt_message(self, addr, encrypted_message):
-    #     key = self.peers.get(addr[0])
-    #     if not key:
-    #         print("Key not found for this peer.")
-    #         return
-    #     cipher = Cipher(algorithms.AES(key), modes.CFB8(key[:16]), backend=default_backend())
-    #     decryptor = cipher.decryptor()
-    #     decrypted_message = decryptor.update(encrypted_message) + decryptor.finalize()
-    #     self.display_message(addr, decrypted_message.decode())
 
     def display_message(self, addr, message):
         print(f"Message from {addr[0]}: {message}")

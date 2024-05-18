@@ -40,9 +40,9 @@ class ChatInitiator:
             conn.connect((target_ip, TCP_PORT))
             
             # Send the initial number
-            message = json.dumps({"key": self.parameters[1] ** number % self.parameters[0]})
+            payload = json.dumps({"key": self.parameters[1] ** number % self.parameters[0]})
 
-            conn.send(message.encode())
+            conn.send(payload.encode())
             
             # Wait for peer's number and generate the shared key
             peer_message = json.loads(conn.recv(1024).decode())
@@ -53,9 +53,6 @@ class ChatInitiator:
             else:
                 print("Key exchange failed.")
                 return
-            
-            print(f"Shared secret key is: {shared_secret}")
-
             
             iv = b'\x00' * 16  # Use a fixed IV for simplicity (not recommended for production)
             cipher = Cipher(algorithms.AES(self.generate_key_from_number(shared_secret)), modes.CBC(iv), backend=default_backend())
@@ -71,8 +68,6 @@ class ChatInitiator:
             encoded_message = base64.b64encode(encrypted_message).decode('utf-8')
 
             payload = json.dumps({"encrypted_message": encoded_message})
-
-            print(f"payload is {payload}")
 
             conn.send(payload.encode())
 
