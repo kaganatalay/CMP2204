@@ -1,9 +1,10 @@
+import base64
 import os
 import socket
 import json
 from datetime import datetime
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives import padding, hashes
 from cryptography.hazmat.backends import default_backend
 
 TCP_PORT = 6001
@@ -57,31 +58,35 @@ class ChatInitiator:
             
             print(f"Shared secret key is: {shared_secret}")
 
-            iv = os.urandom(16)  # Initialization vector
-            cipher = Cipher(algorithms.AES(self.derive_key_from_int(shared_secret)), modes.CBC(iv), backend=default_backend())
+            
+            iv = b'\x00' * 16  # Use a fixed IV for simplicity (not recommended for production)
+            cipher = Cipher(algorithms.AES(self.generate_key_from_number(shared_secret)), modes.CBC(iv), backend=default_backend())
             encryptor = cipher.encryptor()
             
             padder = padding.PKCS7(algorithms.AES.block_size).padder()
             padded_data = padder.update(message.encode()) + padder.finalize()
             
-            encrypted_message = encryptor.update(padded_data) + encryptor.finalize()
-            payload = json.dumps({"encrypted_message": encrypted_message})
+            ct = encryptor.update(padded_data) + encryptor.finalize()
+            encrypted_message = iv + ct
+
+            # Base64 encode the encrypted message
+            encoded_message = base64.b64encode(encrypted_message).decode('utf-8')
+
+            payload = json.dumps({"encrypted_message": encoded_message})
             conn.send(payload.encode())
 
-            print(f"Message sent: {encrypted_message}")
+            print(f"Message sent: {encoded_message}")
 
             self.log_message(target_ip, "SENT", message)  
 
-    def derive_key_from_int(integer):
-        key_bytes = integer.to_bytes((integer.bit_length() + 7) // 8, byteorder='big')
-        hkdf = HKDF(
-            algorithm=SHA256(),
-            length=32,
-            salt=None,
-            info=b'handshake data',
-            backend=default_backend()
-        )
-        return hkdf.derive(key_bytes)
+    def generate_key_from_number(self, number):
+        # Convert the number to a string and encode it to bytes
+        number_str = str(number).encode()
+        # Hash the number to get a 256-bit key
+        digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+        digest.update(number_str)   
+        key = digest.finalize()
+        return key
 
     def unsecure_chat(self, target_ip, message):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

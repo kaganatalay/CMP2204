@@ -1,14 +1,12 @@
+import base64
 import socket
 import json
 from datetime import datetime
 import threading
 import random
-from cryptography.hazmat.primitives.asymmetric import dh
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_public_key
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import padding, hashes
 
 TCP_PORT = 6001
 
@@ -19,6 +17,7 @@ class ChatResponder:
         self.sock.listen(5)
         self.peers = {}
         self.peer_discovery = peer_discovery
+        self.shared_secret = None
 
         self.parameters = (17087896287367280659160173621749326217267278844161313900219344892915400724841504636696352281067519, 11111111111111111111111111111111111111111111111111111111111111111111111111111111111011111111111111)
  
@@ -32,30 +31,47 @@ class ChatResponder:
         data = conn.recv(1024)
         message = json.loads(data.decode())
         if "key" in message:
-            self.buh(conn, addr, message["key"])
+            self.exchange_keys(conn, addr, message["key"])
         elif "encrypted_message" in message:
-            self.decrypt_message(addr, bytes.fromhex(message["encrypted_message"]))
+            self.decrypt_message(addr, message["encrypted_message"])
         elif "unencrypted_message" in message:
             self.display_message(addr, message["unencrypted_message"])
         conn.close()
 
-    def buh(self, conn, addr, key):
+    def exchange_keys(self, conn, addr, key):
         private_key = random.randrange(1, 100)
         message = json.dumps({"key": self.parameters[1] ** private_key % self.parameters[0]})
         conn.send(message.encode())
 
-        shared_secret = key ** private_key % self.parameters[0]
-        print(f"Shared secret key is: {shared_secret}")
+        self.shared_secret = key ** private_key % self.parameters[0]
+        print(f"Shared secret key is: {self.shared_secret}")
         
+    def decrypt_message(self, encoded_message):
+        print(f"Decoding....")
 
-    # def exchange_keys(self, conn, addr, peer_public_key_hex):
-    #     private_key = self.dh_parameters.generate_private_key()
-    #     peer_public_key = load_pem_public_key(bytes.fromhex(peer_public_key_hex), backend=default_backend())
-    #     shared_key = private_key.exchange(peer_public_key)
-    #     key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b'handshake data', backend=default_backend()).derive(shared_key)
-    #     public_key = private_key.public_key()
-    #     conn.send(json.dumps({"key": public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).hex()}).encode())
-    #     self.peers[addr[0]] = key
+
+        encrypted_message = base64.b64decode(encoded_message)
+        iv = encrypted_message[:16]
+        ct = encrypted_message[16:]
+        cipher = Cipher(algorithms.AES(self.generate_key_from_number(self.shared_secret)), modes.CBC(iv), backend=default_backend())
+        decryptor = cipher.decryptor()
+
+        padded_data = decryptor.update(ct) + decryptor.finalize()
+
+        unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+        data = unpadder.update(padded_data) + unpadder.finalize()
+
+
+        print(f"Decoded: {data.decode()}")
+    
+    def generate_key_from_number(self, number):
+        # Convert the number to a string and encode it to bytes
+        number_str = str(number).encode()
+        # Hash the number to get a 256-bit key
+        digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+        digest.update(number_str)   
+        key = digest.finalize()
+        return key
 
     # def decrypt_message(self, addr, encrypted_message):
     #     key = self.peers.get(addr[0])
