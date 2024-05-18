@@ -42,6 +42,7 @@ class ChatResponder:
             # Then receive the encrypted message
             d = conn.recv(1024)
             m = json.loads(d.decode())
+            print(m["encrypted_message"])
             self.decrypt_message(m["encrypted_message"])
         elif "unencrypted_message" in message:
             self.display_message(addr, message["unencrypted_message"])
@@ -70,7 +71,6 @@ class ChatResponder:
 
         unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
         data = unpadder.update(padded_data) + unpadder.finalize()
-
 
         print(f"Decoded: {data.decode()}")
     
