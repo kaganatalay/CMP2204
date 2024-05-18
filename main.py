@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 
 # Constants
-BROADCAST_IP = '255.255.255.255'
+BROADCAST_IP = '192.168.1.255'
 ANNOUNCE_PORT = 6000
 CHAT_PORT = 6001
 ANNOUNCE_INTERVAL = 8
