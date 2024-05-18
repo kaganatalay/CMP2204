@@ -15,6 +15,8 @@ class ChatInitiator:
     def __init__(self, peer_discovery):
         self.peer_discovery = peer_discovery
 
+        self.parameters = (17087896287367280659160173621749326217267278844161313900219344892915400724841504636696352281067519, 11111111111111111111111111111111111111111111111111111111111111111111111111111111111011111111111111)
+
     def start_chat(self, secure):
         peers = self.peer_discovery.get_active_peers()
         if not peers:
@@ -40,22 +42,28 @@ class ChatInitiator:
             conn.connect((target_ip, TCP_PORT))
             
             # Send the initial number
-            message = json.dumps({"key": number})
+            message = json.dumps({"key": self.parameters[1] ** number % self.parameters[0]})
+
+            print(f"message is {message}")
             conn.send(message.encode())
             
             # Wait for peer's number and generate the shared key
             peer_message = json.loads(conn.recv(1024).decode())
+            print(f"peer message is {peer_message}")
+
             if "key" in peer_message:
                 peer_number = int(peer_message["key"])
-                shared_key = self.generate_shared_key(int(number), peer_number)
+                shared_secret = peer_number ** number % self.parameters[0]
             else:
                 print("Key exchange failed.")
                 return
             
-            encrypted_message = self.encrypt_message(shared_key, message)
-            message = json.dumps({"encrypted_message": encrypted_message.hex()})
-            conn.send(message.encode())
-            self.log_message(target_ip, "SENT", message)
+            print(f"Shared secret key is: {shared_secret}")
+            
+            # encrypted_message = self.encrypt_message(shared_secret, message)
+            # message = json.dumps({"encrypted_message": encrypted_message.hex()})
+            # conn.send(message.encode())
+            # self.log_message(target_ip, "SENT", message)
 
     def unsecure_chat(self, target_ip, message):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
