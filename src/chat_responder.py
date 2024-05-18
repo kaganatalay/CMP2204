@@ -17,6 +17,7 @@ class ChatResponder:
         self.sock.bind(('', TCP_PORT))
         self.sock.listen(5)
         self.peers = {}
+        self.dh_parameters = dh.generate_parameters(generator=2, key_size=2048, backend=default_backend())
 
     def listen(self):
         while True:
@@ -35,7 +36,7 @@ class ChatResponder:
         conn.close()
 
     def exchange_keys(self, conn, addr, peer_public_key_hex):
-        private_key = dh_parameters.generate_private_key()
+        private_key = self.dh_parameters.generate_private_key()
         peer_public_key = load_pem_public_key(bytes.fromhex(peer_public_key_hex), backend=default_backend())
         shared_key = private_key.exchange(peer_public_key)
         key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b'handshake data', backend=default_backend()).derive(shared_key)
