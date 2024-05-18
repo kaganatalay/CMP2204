@@ -28,6 +28,8 @@ class ChatResponder:
             threading.Thread(target=self.handle_connection, args=(conn, addr)).start()
 
     def handle_connection(self, conn, addr):
+        print("connection handler")
+
         data = conn.recv(1024)
 
         print(data)
@@ -39,10 +41,11 @@ class ChatResponder:
             self.exchange_keys(conn, addr, message["key"])
         elif "encrypted_message" in message:
             self.decrypt_message(addr, message["encrypted_message"])
+            conn.close()
         elif "unencrypted_message" in message:
             self.display_message(addr, message["unencrypted_message"])
-        conn.close()
-
+            conn.close()
+        
     def exchange_keys(self, conn, addr, key):
         private_key = random.randrange(1, 100)
         message = json.dumps({"key": self.parameters[1] ** private_key % self.parameters[0]})
