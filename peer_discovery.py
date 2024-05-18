@@ -9,6 +9,7 @@ class Peer:
         self.username = username
         self.ip = ip
         self.last_seen = last_seen
+        self.status = "Online"
 
 class PeerDiscovery:
     def __init__(self):
@@ -23,15 +24,32 @@ class PeerDiscovery:
                 message = json.loads(data.decode())
                 username = message.get("username")
                 if username:
-                    self.peers[addr[0]] = Peer(username, addr[0], datetime.now())
-                    print(f"{username} is online")
+                    ip = addr[0]
+                    current_time = datetime.now()
+                    new_status = "Online"
+                    
+                    if ip in self.peers:
+                        peer = self.peers[ip]
+                        peer.last_seen = current_time
+                        if peer.status != new_status:
+                            peer.status = new_status
+                            print(f"{peer.username} is online")
+                    else:
+                        self.peers[ip] = Peer(username, ip, current_time)
+                        print(f"{username} is online")
             except json.JSONDecodeError:
                 continue
 
     def get_active_peers(self):
         active_peers = {}
+        current_time = datetime.now()
         for ip, peer in self.peers.items():
-            if datetime.now() - peer.last_seen < timedelta(minutes=15):
-                status = "Online" if datetime.now() - peer.last_seen < timedelta(seconds=10) else "Away"
-                active_peers[ip] = (peer.username, status)
+            last_seen_delta = current_time - peer.last_seen
+            if last_seen_delta < timedelta(minutes=15):
+                new_status = "Online" if last_seen_delta < timedelta(seconds=10) else "Away"
+                if peer.status != new_status:
+                    peer.status = new_status
+                    status_message = "online" if new_status == "Online" else "away"
+                    print(f"{peer.username} is {status_message}")
+                active_peers[ip] = (peer.username, new_status)
         return active_peers

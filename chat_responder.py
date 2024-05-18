@@ -30,10 +30,10 @@ class ChatResponder:
         message = json.loads(data.decode())
         if "key" in message:
             self.exchange_keys(conn, addr, message["key"])
-        elif "encrypted message" in message:
-            self.decrypt_message(addr, bytes.fromhex(message["encrypted message"]))
-        elif "unencrypted message" in message:
-            self.display_message(addr, message["unencrypted message"])
+        elif "encrypted_message" in message:
+            self.decrypt_message(addr, bytes.fromhex(message["encrypted_message"]))
+        elif "unencrypted_message" in message:
+            self.display_message(addr, message["unencrypted_message"])
         conn.close()
 
     def exchange_keys(self, conn, addr, peer_public_key_hex):
