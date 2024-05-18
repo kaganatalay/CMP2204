@@ -41,17 +41,14 @@ class ChatResponder:
 
             # Then receive the encrypted message
             d = conn.recv(1024)
-            
             m = json.loads(d.decode())
-            print("Data received for encrypted message:", m)
-            
-        elif "encrypted_message" in message:
-            self.decrypt_message(addr, message["encrypted_message"])
-            conn.close()
+            self.decrypt_message(addr, m["encrypted_message"])
         elif "unencrypted_message" in message:
             self.display_message(addr, message["unencrypted_message"])
-            conn.close()
-        
+
+        conn.close()
+
+
     def exchange_keys(self, conn, addr, key):
         private_key = random.randrange(1, 100)
         message = json.dumps({"key": self.parameters[1] ** private_key % self.parameters[0]})
@@ -62,7 +59,6 @@ class ChatResponder:
         
     def decrypt_message(self, encoded_message):
         print(f"Decoding....")
-
 
         encrypted_message = base64.b64decode(encoded_message)
         iv = encrypted_message[:16]
