@@ -36,9 +36,15 @@ class ChatResponder:
 
         message = json.loads(data.decode())
 
-
         if "key" in message:
             self.exchange_keys(conn, addr, message["key"])
+
+            # Then receive the encrypted message
+            d = conn.recv(1024)
+            
+            m = json.loads(d.decode())
+            print("Data received for encrypted message:", m)
+            
         elif "encrypted_message" in message:
             self.decrypt_message(addr, message["encrypted_message"])
             conn.close()
