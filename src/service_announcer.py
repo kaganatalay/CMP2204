@@ -3,7 +3,7 @@ import time
 import json
 
 BROADCAST_PORT = 6000
-BROADCAST_IP = "255.255.255.255"  # This should be updated to the correct broadcast address
+BROADCAST_IP = "192.168.1.255"  # This should be updated to the correct broadcast address
 
 class ServiceAnnouncer:
     def __init__(self, username):
