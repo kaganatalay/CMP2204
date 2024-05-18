@@ -12,12 +12,13 @@ from cryptography.hazmat.backends import default_backend
 TCP_PORT = 6001
 
 class ChatResponder:
-    def __init__(self):
+    def __init__(self, peer_discovery):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind(('', TCP_PORT))
         self.sock.listen(5)
         self.peers = {}
         self.dh_parameters = dh.generate_parameters(generator=2, key_size=2048, backend=default_backend())
+        self.peer_discovery = peer_discovery
 
     def listen(self):
         while True:
@@ -60,4 +61,6 @@ class ChatResponder:
 
     def log_message(self, ip, direction, message):
         with open("chat_history.log", "a") as log_file:
-            log_file.write(f"{datetime.now()}, {self.peer_discovery.peers[ip].username}, {ip}, {direction}, {message}\n")
+            peer = self.peer_discovery.peers.get(ip)
+            username = peer.username if peer else "Unknown"
+            log_file.write(f"{datetime.now()}, {username}, {ip}, {direction}, {message}\n")
