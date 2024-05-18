@@ -42,12 +42,10 @@ class ChatInitiator:
             # Send the initial number
             message = json.dumps({"key": self.parameters[1] ** number % self.parameters[0]})
 
-            print(f"message is {message}")
             conn.send(message.encode())
             
             # Wait for peer's number and generate the shared key
             peer_message = json.loads(conn.recv(1024).decode())
-            print(f"peer message is {peer_message}")
 
             if "key" in peer_message:
                 peer_number = int(peer_message["key"])
@@ -73,9 +71,10 @@ class ChatInitiator:
             encoded_message = base64.b64encode(encrypted_message).decode('utf-8')
 
             payload = json.dumps({"encrypted_message": encoded_message})
-            conn.send(payload.encode())
 
-            print(f"Message sent: {encoded_message}")
+            print(f"payload is {payload}")
+
+            conn.send(payload.encode())
 
             self.log_message(target_ip, "SENT", message)  
 

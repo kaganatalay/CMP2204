@@ -29,7 +29,12 @@ class ChatResponder:
 
     def handle_connection(self, conn, addr):
         data = conn.recv(1024)
+
+        print(data)
+
         message = json.loads(data.decode())
+
+
         if "key" in message:
             self.exchange_keys(conn, addr, message["key"])
         elif "encrypted_message" in message:
