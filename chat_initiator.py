@@ -58,7 +58,7 @@ class ChatInitiator:
             print(f"Shared secret key is: {shared_secret}")
 
             iv = os.urandom(16)  # Initialization vector
-            cipher = Cipher(algorithms.AES(shared_secret), modes.CBC(iv), backend=default_backend())
+            cipher = Cipher(algorithms.AES(self.derive_key_from_int(shared_secret)), modes.CBC(iv), backend=default_backend())
             encryptor = cipher.encryptor()
             
             padder = padding.PKCS7(algorithms.AES.block_size).padder()
@@ -71,6 +71,17 @@ class ChatInitiator:
             print(f"Message sent: {encrypted_message}")
 
             self.log_message(target_ip, "SENT", message)  
+
+    def derive_key_from_int(integer):
+        key_bytes = integer.to_bytes((integer.bit_length() + 7) // 8, byteorder='big')
+        hkdf = HKDF(
+            algorithm=SHA256(),
+            length=32,
+            salt=None,
+            info=b'handshake data',
+            backend=default_backend()
+        )
+        return hkdf.derive(key_bytes)
 
     def unsecure_chat(self, target_ip, message):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
