@@ -37,7 +37,7 @@ class ChatInitiator:
             self.unsecure_chat(target_ip, message)
 
     def secure_chat(self, target_ip, message):
-        number = input("Enter a number to initiate the key exchange: ").strip()
+        number = int(input("Enter a number to initiate the key exchange: ").strip())
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as conn:
             conn.connect((target_ip, TCP_PORT))
             
