@@ -50,11 +50,13 @@ class ChatResponder:
         conn.send(message.encode())
 
         self.shared_secret = key ** private_key % self.parameters[0]
-        
+    
     def decrypt_message(self, addr, encoded_message):
         encrypted_message = base64.b64decode(encoded_message)
         iv = encrypted_message[:16]
         ct = encrypted_message[16:]
+
+        # please god save me
         cipher = Cipher(algorithms.AES(self.generate_key_from_number(self.shared_secret)), modes.CBC(iv), backend=default_backend())
         decryptor = cipher.decryptor()
 

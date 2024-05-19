@@ -9,7 +9,7 @@ if __name__ == "__main__":
     announcer = ServiceAnnouncer(username)
     discovery = PeerDiscovery()
     initiator = ChatInitiator(discovery)
-    responder = ChatResponder(discovery)  # Pass the peer_discovery object here
+    responder = ChatResponder(discovery)
 
     threading.Thread(target=announcer.broadcast).start()
     threading.Thread(target=discovery.listen).start()
