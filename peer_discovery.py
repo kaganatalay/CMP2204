@@ -31,6 +31,11 @@ class PeerDiscovery:
                     if ip in self.peers:
                         peer = self.peers[ip]
                         peer.last_seen = current_time
+
+                        # Update user if needed
+                        if peer.username != username:
+                            peer.username = username
+
                         if peer.status != new_status:
                             peer.status = new_status
                             print(f"{peer.username} is online")

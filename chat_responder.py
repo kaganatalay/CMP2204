@@ -75,7 +75,7 @@ class ChatResponder:
         return key
 
     def display_message(self, addr, message):
-        print(f"Message from {self.peer_discovery.get_username_from_ip(addr[0])}: {message}")
+        print(f"\nMessage from {self.peer_discovery.get_username_from_ip(addr[0])}: {message}")
         self.log_message(self.peer_discovery.get_username_from_ip(addr[0]), "RECEIVED", message)
 
     def log_message(self, username, direction, message):
