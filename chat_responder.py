@@ -50,7 +50,6 @@ class ChatResponder:
         conn.send(message.encode())
 
         self.shared_secret = key ** private_key % self.parameters[0]
-        print(f"Shared secret key is: {self.shared_secret}")
         
     def decrypt_message(self, addr, encoded_message):
         encrypted_message = base64.b64decode(encoded_message)
@@ -64,7 +63,7 @@ class ChatResponder:
         unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
         data = unpadder.update(padded_data) + unpadder.finalize()
 
-        self.display_message(addr, data)
+        self.display_message(addr, data.decode())
     
     def generate_key_from_number(self, number):
         # Convert the number to a string and encode it to bytes
@@ -76,11 +75,9 @@ class ChatResponder:
         return key
 
     def display_message(self, addr, message):
-        print(f"Message from {addr[0]}: {message}")
-        self.log_message(addr[0], "RECEIVED", message)
+        print(f"Message from {self.peer_discovery.get_username_from_ip(addr[0])}: {message}")
+        self.log_message(self.peer_discovery.get_username_from_ip(addr[0]), "RECEIVED", message)
 
-    def log_message(self, ip, direction, message):
+    def log_message(self, username, direction, message):
         with open("chat_history.log", "a") as log_file:
-            peer = self.peer_discovery.peers.get(ip)
-            username = peer.username if peer else "Unknown"
-            log_file.write(f"{datetime.now()}, {username}, {ip}, {direction}, {message}\n")
+            log_file.write(f"{datetime.now()}, {username}, {direction}, {message}\n")

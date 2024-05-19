@@ -40,6 +40,12 @@ class PeerDiscovery:
             except json.JSONDecodeError:
                 continue
 
+    def get_username_from_ip(self, ip):
+        peer = self.peers.get(ip)
+        if peer:
+            return peer.username
+        return None
+
     def get_active_peers(self):
         active_peers = {}
         current_time = datetime.now()
