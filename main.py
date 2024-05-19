@@ -16,12 +16,12 @@ if __name__ == "__main__":
     threading.Thread(target=responder.listen).start()
 
     while True:
-        command = input("Enter 'Users' to view online users, 'Chat' to start a chat, 'History' to view chat history: ")
-        if command == "Users":
+        command = input("Enter 'Users' to view online users, 'Chat' to start a chat, 'History' to view chat history: ").lower()
+        if command == "users":
             for ip, (username, status) in discovery.get_active_peers().items():
                 print(f"{username} ({status}) - {ip}")
-        elif command == "Chat":
+        elif command == "chat":
             secure = input("Secure chat? (yes/no): ").strip().lower() == "yes"
             initiator.start_chat(secure)
-        elif command == "History":
+        elif command == "history":
             initiator.view_chat_history()
